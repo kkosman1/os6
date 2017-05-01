@@ -44,33 +44,34 @@ int fs_format()
 		
 	disk_read(0, block.data);
 		
-	for (int i=1; i<POINTERS_PER_INODE; i++){
+	for (i=1; i<POINTERS_PER_INODE; i++){
 		if (block.inode[i].isvalid == 1){
-			fs_delete(block.inode[i]); //get inumber and delete it
+			//fs_delete(block.inode[i].inumber); //get inumber and delete it
 		}
 	}
 		
 	superblock.magic = FS_MAGIC;
 	superblock.nblocks = DISK_BLOCK_SIZE;
 	superblock.ninodeblocks = DISK_BLOCK_SIZE*.10;
-	superblock.niodes = INODES_PER_BLOCK * DISK_BLOCK_SIZE*.10;  //total		      
-	
+	superblock.ninodes = INODES_PER_BLOCK * DISK_BLOCK_SIZE*.10;  //total		      
+	/*
 	if (disk_write(0, superblock)){
 		return 1;
 	}
 	else{
 		return 0; //if fails to write, return 0
 	}
+	*/
 }
 
 void fs_debug()
 {
 	int i;
-	int j;
 	int size;
 	int extra=0;
-	int numinodes=0;
 	int nCounter=0;
+	int numblock=0;
+	int remainder=0;
 	
 	union fs_block block;
 
@@ -97,19 +98,19 @@ void fs_debug()
 			nCounter=0;
 			numblock = (size + (DISK_BLOCK_SIZE-1))/ DISK_BLOCK_SIZE; //get upper limit of division
 			remainder = size % DISK_BLOCK_SIZE;		
-			while(nCounter < numblocks){
+			while(nCounter < numblock){
 				//go until it is equal to number of direct blocks - 1
-				if (nCounter < numblocks-1){
+				if (nCounter < numblock-1){
 					printf(" %d ", block.inode[i].direct[nCounter]);
 				}
 				//if you run into partial on the last one
-				else if(size < (nCounter*DISK_BLOCK_SIZE) && (nCounter == numblocks -1)){
+				else if(size < (nCounter*DISK_BLOCK_SIZE) && (nCounter == numblock -1)){
 					printf(" %d ", block.inode[i].direct[nCounter]);
 				}
 				//if you run into indirect on last one
-				else if (size > (nCounter*DISK_BLOCK_SIZE) && (nCounter == numblocks -1)){
+				else if (size > (nCounter*DISK_BLOCK_SIZE) && (nCounter == numblock -1)){
 					nCounter=0; //start back to beginnign for indirect block indexing
-					extra = size - (nCounter*DISK_BLOCK_SIZE)
+					extra = size - (nCounter*DISK_BLOCK_SIZE);
 					union fs_block indirectblock;
 					//go to the indirect block which contains a list of pointers
 					disk_read(block.inode[i].direct[nCounter], indirectblock.data);
@@ -155,8 +156,8 @@ int fs_mount()
 
 int fs_create()
 {
-	fs_inode iNode;
-	iNode.length=0;
+	struct fs_inode iNode;
+	iNode.size=0;
 	iNode.isvalid=1;
 	return iNode;
 }
@@ -165,7 +166,7 @@ int fs_delete( int inumber )
 {
 	int extra = 0;
 	int size = 0;
-	int numblock;
+	int numblocks;
 	int remainder;
 	int nCounter;
 	
@@ -176,22 +177,20 @@ int fs_delete( int inumber )
 	}
 	
 	//loop through and free all of the data
-	free(block.inode[inumber]);
+	//free(block.inode[inumber]);
 	size = block.inode[1];
 	nCounter=0;
-	numblock = (size + (DISK_BLOCK_SIZE-1))/ DISK_BLOCK_SIZE; //get upper limit of divisi$
+	numblocks = (size + (DISK_BLOCK_SIZE-1))/ DISK_BLOCK_SIZE; //get upper limit of divisi$
 	remainder = size % DISK_BLOCK_SIZE;
 	while(nCounter < numblocks){		
 		//if on the last on and it has an indirect block
 		if (size > (nCounter*DISK_BLOCK_SIZE) && (nCounter == numblocks -1)){
-			nCounter=0;
-			
-			//go into direct and free those
-			extra = size - (nCounter*DISK_BLOCK_SIZE)
 			union fs_block indirectblock;
-			
 			//go to the indirect block which contains a list of pointers
-			disk_read(block.inode[i].direct[nCounter], indirectblock.data);
+			disk_read(block.inode[inumber].direct[nCounter], indirectblock.data);
+			nCounter=0;
+			//go into direct and free those
+			extra = size - (nCounter*DISK_BLOCK_SIZE);
 			while (extra > 0){
 				free(indirectblock.pointers[nCounter]);
 				nCounter++;
@@ -199,7 +198,7 @@ int fs_delete( int inumber )
 			}
 		}
 		else if (nCounter < numblocks-1){
-			free(block.inode[i].direct[nCounter]);
+			free(block.inode[inumber].direct[nCounter]);
 		}		
 		nCounter++;
 	}
@@ -213,7 +212,7 @@ int fs_getsize( int inumber )
 	if (block.inode[inumber].isvalid == 0){
 		return -1; //check if vaild first
 	}
-	return block.inode[inumber].size();
+	return block.inode[inumber].size;
 }
 
 int fs_read( int inumber, char *data, int length, int offset )
@@ -242,8 +241,8 @@ int fs_write( int inumber, const char *data, int length, int offset )
 	if (block.inode[inumber].isvalid == 0){
 		return 0; //check if vaild first
 	}						
-	malloc((sizeof(data));
+	malloc(sizeof(data));
 	memcpy(offset, data, length);
 	byteCount = write(offset, data, length);
-	return 0;
+	return byteCount;
 }
