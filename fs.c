@@ -50,8 +50,7 @@ int fs_format()
 
 	union fs_block block;
 	struct fs_inode blankinode = {0,0,{0,0,0,0,0},0};
-	int i;
-		
+	int i;	
 		
 	for (i=0; i<POINTERS_PER_INODE; i++){
 		block.inode[i]=blankinode;
@@ -68,13 +67,11 @@ int fs_format()
 
 void fs_debug()
 {
-	int i;
+	int i,j,k,m;
 	int size;
-	int nCounter=0;
-	int numblock=0;
-	
-	union fs_block block;
-
+	int numblock;
+	int direct;
+	union fs_block block, indirectblock;
 	disk_read(0,block.data);
 
 	printf("superblock:\n");
@@ -86,35 +83,35 @@ void fs_debug()
 	printf("    %d inode blocks\n",block.super.ninodeblocks);
 	printf("    %d inodes total \n",block.super.ninodes);
 	
-	for (i=1; i<block.super.ninodes; i++){
-		if (block.inode[i].isvalid == 1){
-			printf("inode: %d \n", i);
-			printf("    size %d bytes \n", block.inode[i].size);
-			printf("    direct blocks: ");
-			size = block.inode[i].size;
-			nCounter=0;
-			numblock = ceil(size/DISK_BLOCK_SIZE); //get upper limit of division
-			int indirect = -1;
-			union fs_block indirectblock;
-			while(nCounter < numblock){
-				if (block.inode[i].direct[nCounter]!=0){
-					printf("%d ", block.inode[i].direct[nCounter]);
+	int ninodes = block.super.ninodeblocks;
+	for (i=1; i<=ninodes; i++){
+		disk_read(i,block.data);
+		for (j=0;j<128;j++){
+			if (block.inode[j].isvalid == 1){
+				printf("inode: %d \n", j);
+				printf("    size %d bytes \n", block.inode[j].size);
+				printf("    direct blocks: ");
+				size = block.inode[j].size;
+				numblock = ceil((double)size/(double)DISK_BLOCK_SIZE); //get upper limit of division
+				if (numblock >= POINTERS_PER_INODE)
+					direct=POINTERS_PER_INODE;
+				else
+					direct=numblock;
+				numblock=numblock-direct;
+				for (k=0;k<direct;k++){
+					printf("%d ", block.inode[j].direct[k]);
 				}	
-				else if (indirect==-1){
-					indirect++;
-                                        //go to the indirect block which contains a list of pointers
-                                        disk_read(block.inode[i].indirect, indirectblock.data);
-                                        printf("\n    indirect block: %d\n", block.inode[i].indirect);
-					if (nCounter!=numblock-1)
-						printf("    indirect data blocks: ");
+				if (numblock>0){
+                        	        //go to the indirect block which contains a list of pointers
+                                        printf("\n    indirect block: %d\n", block.inode[j].indirect);
+					disk_read(block.inode[j].indirect, indirectblock.data);
+					printf("    indirect data blocks: ");
+					for (m=0;m<numblock;m++) {
+						printf("%d ", indirectblock.pointers[m]);
+					}
 				}
-				else {
-					printf("%d ", indirectblock.pointers[indirect]);
-					indirect++;
-				}
-				nCounter++;
+				printf("\n");
 			}
-			printf("\n");
 		}
 	}
 }
@@ -127,7 +124,7 @@ int fs_mount()
 		return 0;
 	}
 
-	union fs_block block;
+	union fs_block block, indirectblock;
 	disk_read(0,block.data);
 
 	//Check magic number
@@ -137,62 +134,69 @@ int fs_mount()
 	}
 
 	//Set up the bitmap
-	INODE_BITMAP = malloc(block.super.ninodes+1 * sizeof(char));
+	INODE_BITMAP = malloc(block.super.ninodes * sizeof(char));
 	BLOCK_BITMAP = malloc(block.super.nblocks * sizeof(char));
 
-	//fill inode and block bitmaps (set free to 0)
-	int i;
-
+	int i,j,k,m;
 	//initialize block bitmap to 0
 	for (i=0;i<block.super.nblocks;i++)
 		BLOCK_BITMAP[i]='0';
 
-	int numblock, nCounter, size;
+	int numblock, size, direct;
 
-	for (i=1;i<=block.super.ninodes; i++){
-		if (block.inode[i].isvalid==1){ //set inode bitmap
-			INODE_BITMAP[i]='1';
-
-                        size = block.inode[i].size;
-                        nCounter=0;
-                        numblock = (size/DISK_BLOCK_SIZE); //get upper limit of division
-                        int indirect = -1;
-                        union fs_block indirectblock;
-                        while(nCounter < numblock){
-                                if (BLOCK_BITMAP[nCounter]==1){
-                                        BLOCK_BITMAP[block.inode[i].direct[nCounter]]='1';
+	int ninodes = block.super.ninodeblocks;
+        for (i=1; i<=ninodes; i++){
+                disk_read(i,block.data);
+                for (j=0;j<128;j++){
+                        if (block.inode[j].isvalid == 1){
+				INODE_BITMAP[j]='1';
+                                size = block.inode[j].size;
+                                numblock = ceil((double)size/(double)DISK_BLOCK_SIZE); //get upper limit of division
+                                if (numblock >= POINTERS_PER_INODE)
+                                        direct=POINTERS_PER_INODE;
+                                else
+                                        direct=numblock;
+                                numblock=numblock-direct;
+                                for (k=0;k<direct;k++){
+                                	BLOCK_BITMAP[block.inode[j].direct[k]]='1';
                                 }
-                                else if (indirect==-1){
-                                        indirect++;
+                                if (numblock>0){
                                         //go to the indirect block which contains a list of pointers
-                                        disk_read(block.inode[i].indirect, indirectblock.data);
-					BLOCK_BITMAP[block.inode[i].indirect]= '1';
-				}
-                                else {
-                                        BLOCK_BITMAP[indirectblock.pointers[indirect]]='1';
-                                        indirect++;
+                                        disk_read(block.inode[j].indirect, indirectblock.data);
+                                        for (m=0;m<numblock;m++) {
+                                                BLOCK_BITMAP[indirectblock.pointers[m]]='1';
+                                        }
                                 }
-                                nCounter++;
                         }
+			else {
+				INODE_BITMAP[j] = '0';
+			}
                 }
-		else{
-                        INODE_BITMAP[i]='0';
-		}
         }
+
 	MOUNT=1;
 	return 1;
 }
 
 int fs_create()
 {
+	if (MOUNT==0){
+		printf("Error: cannot create before mounting\n");
+		return 0;
+	}
 	union fs_block block;
 	disk_read(0,block.data);
 	int i;
+	struct fs_inode blankinode = {0,0,{0,0,0,0,0},0};
+	blankinode.isvalid=1;
+
 	for (i=1;i<=block.super.ninodes;i++){
 		if (INODE_BITMAP[i]=='0'){
 			INODE_BITMAP[i]='1';
-			block.inode[i].size=0;
-			block.inode[i].isvalid=1;
+			int blocknum = i/127 + 1;
+			disk_read(blocknum, block.data);
+			block.inode[i] = blankinode;
+			disk_write(blocknum, block.data);
 			return i;
 		}
 	}
@@ -201,39 +205,49 @@ int fs_create()
 
 int fs_delete( int inumber )
 {
-	union fs_block block;
-	disk_read(0,block.data);
-
-	if (block.inode[inumber].isvalid == 1){
-        	int size = block.inode[inumber].size;
-                int nCounter=0;
-                int numblock = ceil(size/DISK_BLOCK_SIZE); //get upper limit of division
-                int indirect = -1;
-                union fs_block indirectblock;
-                while(nCounter < numblock){
-                	if (BLOCK_BITMAP[nCounter]==1){
-				BLOCK_BITMAP[block.inode[inumber].direct[nCounter]]='0';
-                        }
-                        else if (indirect==-1){
-                	        indirect++;
-                                //go to the indirect block which contains a list of pointers
-                                disk_read(block.inode[inumber].indirect, indirectblock.data);
-				BLOCK_BITMAP[block.inode[inumber].indirect]='0';
-                        }
-			else {
-                                BLOCK_BITMAP[indirectblock.pointers[indirect]]='0';
-                                indirect++;
-                        }
-                        nCounter++;
-		}
+	if (MOUNT==0){
+		printf("Error: cannot delete before mounting.\n");
+		return 0;
 	}
+	int blocknum = inumber/127 + 1;
+	int k,m;
+	int size, numblock, direct;
+	union fs_block block, indirectblock;
+	disk_read(blocknum,block.data);
+
+        if (block.inode[inumber].isvalid == 1){
+        	size = block.inode[inumber].size;
+                numblock = ceil((double)size/(double)DISK_BLOCK_SIZE); //get upper limit of division
+                if (numblock >= POINTERS_PER_INODE)
+                	direct=POINTERS_PER_INODE;
+                else
+                        direct=numblock;
+                numblock=numblock-direct;
+                for (k=0;k<direct;k++){
+                	BLOCK_BITMAP[block.inode[inumber].direct[k]]='0';
+                }
+                if (numblock>0){
+                	//go to the indirect block which contains a list of pointers
+                        disk_read(block.inode[inumber].indirect, indirectblock.data);
+                        for (m=0;m<numblock;m++) {
+                       		BLOCK_BITMAP[indirectblock.pointers[m]]='0';
+                        }
+			BLOCK_BITMAP[block.inode[inumber].indirect]='0';
+                }
+        }
+
+	struct fs_inode blankinode={0,0,{0,0,0,0,0},0};
+	block.inode[inumber]=blankinode;
+	disk_write(blocknum, block.data);
+
 	return 1;
 }
 
 int fs_getsize( int inumber )
 {
+	int blocknum = inumber/127 + 1;
 	union fs_block block;
-	disk_read(0,block.data);
+	disk_read(blocknum,block.data);
 	if (block.inode[inumber].isvalid == 0){
 		printf("Error: invalid inumber\n");
 		return -1; //check if vaild first
@@ -243,8 +257,9 @@ int fs_getsize( int inumber )
 
 int fs_read( int inumber, char *data, int length, int offset )
 {
-	union fs_block block;
-	disk_read(0,block.data);
+	int blocknum = inumber/127 + 1;
+	union fs_block block, datablock, indirectblock;
+	disk_read(blocknum,block.data);
 	if (block.inode[inumber].isvalid==0){
 		printf("Error: invalid inumber.\n");
 		return 0;
@@ -252,38 +267,47 @@ int fs_read( int inumber, char *data, int length, int offset )
 	int i;
 	int size = block.inode[inumber].size;
         int nCounter=offset/DISK_BLOCK_SIZE;
+	int end;
 	if (size > (length+offset))
-                size=length+offset;
-        int numblock = ceil(size/DISK_BLOCK_SIZE); //get upper limit of division
-	int remainder = size % DISK_BLOCK_SIZE;
-        int indirect = -1;
-        union fs_block indirectblock;
-        while(nCounter < (numblock)){
-        	if (BLOCK_BITMAP[nCounter]==1){
-			if (nCounter==numblock-1) //last one--use remainder
-				strcat(data, block.data[nCounter][0:remainder]);
-			else
-                		strcat(data, block.data[nCounter]);
-                }
-                else if (indirect==-1){
-                        indirect++;
-                        //go to the indirect block which contains a list of pointers
-                        disk_read(block.inode[inumber].indirect, indirectblock.data);
-			if (nCounter==numblock-1) //last one--use remainder
-                                strcat(data, block.data[nCounter][0:remainder]);
-                        else
-                                strcat(data, block.data[nCounter]);
-                }
-                else {
-			if (nCounter==numblock-1) //last one--use remainder
-                                strcat(data, indirectblock.data[indirect][0:remainder]);
-                        else
-                                strcat(data, indirectblock.data[indirect]);
-                        indirect++;
-		}                
-                nCounter++;
+                end = length+offset;
+	else
+		end = size;
+        int numblock = ceil((double)end/(double)DISK_BLOCK_SIZE); //get upper limit of division
+	int remainder = end % DISK_BLOCK_SIZE;
+	int index=0;
+	int direct, readsize;	
+
+	if (numblock > POINTERS_PER_INODE)
+		direct = POINTERS_PER_INODE;
+	else
+		direct = numblock;
+
+        for (i=nCounter;i<direct;i++){
+		disk_read(block.inode[inumber].direct[i], datablock.data);
+		if (i==numblock)
+			readsize=remainder;
+		else
+			readsize=DISK_BLOCK_SIZE;
+		memcpy(data+index,datablock.data,readsize);
+		index=index+readsize;
 	}
-	return size-offset;
+	int start;
+	if (nCounter>=5)
+		start=nCounter;
+	else
+		start=0;
+	int indirect = numblock-direct;
+	disk_read(block.inode[inumber].indirect, indirectblock.data);
+	for (i=start;i<indirect;i++){
+		disk_read(indirectblock.pointers[i], datablock.data);
+		if (i==numblock)
+			readsize=remainder;
+		else
+			readsize=DISK_BLOCK_SIZE;
+		memcpy(data+index,datablock.data,readsize);
+		index=index+readsize;
+	}
+	return index;
 }
 
 //do last
