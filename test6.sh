@@ -1,14 +1,7 @@
 #!/bin/bash
 HOSTDIR="/afs/nd.edu/user21/jwesthof/Public"
 uut="./simplefs"
-cat <<EOF
-RUNNING LAME TEST SCRIPT VERSION 7
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Please note that this is not a comprehensive test, it just tests
-a couple of corner cases. If you have any questions, comments, concerns,
-suggestions, or whatever, bug @jeffrey on slack, or John Westhoff on facebook.
-
-EOF
+echo "RUNNING LAME TEST SCRIPT VERSION 6"
 tmp=`mktemp -d`
 chmod 777 $tmp
 cp $HOSTDIR/test/image.5 $tmp/img.5
@@ -214,21 +207,4 @@ if [ "$T10A" = "$T10B" ] ; then
     echo "TEST TEN GOOD - Create create delete delete seems to work"
 else
     echo "TEST TEN FAIL - Create create delete delete failed"
-fi
-
-### TEST 11 ##
-$uut $tmp/img.defrag 2000 > /dev/null <<EOF
-format
-mount
-`for i in {1..384} ; do echo "create" ; done`
-`for i in {2..384..2} ; do echo "copyin $HOSTDIR/test/hi $i" ; done`
-copyin $HOSTDIR/test/big 1
-defrag
-copyout 1 $tmp/biggest
-EOF
-## Verify test succeeded ##
-if diff $tmp/biggest $HOSTDIR/test/big > /dev/null ; then
-    echo "TEST 11 GOOD - defrag doesn't break anything"
-else
-    echo "TEST 11 FAIL - defrag breaks something"
 fi
