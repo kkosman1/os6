@@ -148,7 +148,6 @@ int fs_mount()
 
 	for (i=0;i<block.super.ninodes;i++){
 		INODE_BITMAP[i]=0;
-		BLOCK_BITMAP[i]=1;
 	}
 
 	int numblock, size, direct;
@@ -337,10 +336,11 @@ int fs_write( int inumber, const char *data, int length, int offset )
 		printf("Error: not mounted. \n");
 		return 0;
 	}
+	if (offset > sizeof(data))
+		return 0;
 	union fs_block block, indirectblock, datablock;
 	disk_read(0,block.data);
 
-	int size = block.inode[inumber].size;
 	int i, readsize;
 	int index=offset;
 	 
@@ -349,6 +349,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 
 	disk_read(blocknum,block.data);
 	
+	int size = block.inode[inumber].size;
 	int count, icount;
 	int currBlocks = ceil((double)size/(double)DISK_BLOCK_SIZE); //blocks used currently
 	int currRemainder = size % DISK_BLOCK_SIZE;
@@ -359,22 +360,20 @@ int fs_write( int inumber, const char *data, int length, int offset )
 		printf("Error: invalid inumber.\n");
 		return 0;
 	}
-
+	count = currBlocks;
 	if (currBlocks < 5){
-		count = currBlocks; //start direct
 		icount = 1;
 	}
 	else {
-		count = 5;
 		icount = currBlocks-5; //start indirect
 	}
 
 	disk_read(block.inode[inumber].indirect, indirectblock.data);
 
-
-	if (currRemainder != 0){ //fill in end of a block
-		if (count==numblock)
+	if (currRemainder > 0){ //fill in end of a block
+		if (count==numblock){
 			readsize=remainder;
+		}
 		else
 			readsize=DISK_BLOCK_SIZE-currRemainder;
 		if (currBlocks<=5){
@@ -390,10 +389,12 @@ int fs_write( int inumber, const char *data, int length, int offset )
 		index=index+readsize;
 		count++;
 	}
+	printf("currblocks: %d\n", currBlocks);
 
 	for (i=0; i<bitmapSize; i++){
+		printf("hello\n");
 		if (BLOCK_BITMAP[i] == 0){
-			if (count==numblock)
+			if (count==(numblock-1))
 				readsize=remainder;
 			else
 				readsize=DISK_BLOCK_SIZE;
@@ -401,12 +402,15 @@ int fs_write( int inumber, const char *data, int length, int offset )
 			memcpy(datablock.data, data+index, readsize);
 			
 			if (count<=5){ //direct
+				printf("new block: %d\n", count-1);
 				block.inode[inumber].direct[count-1]=i;
 				disk_write(i, datablock.data);
 			}
 			else if (icount <= POINTERS_PER_BLOCK){ //indirect
+				printf("new direct block: %d\n", icount);
 				count++;
 				indirectblock.pointers[icount-1]=i;
+				icount++;
 				disk_write(i, datablock.data);
 			}
 			else {
