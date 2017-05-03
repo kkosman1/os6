@@ -376,7 +376,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 		if (count==numblock)
 			readsize=remainder;
 		else
-			readsize=DISK_BLOCK_SIZE;
+			readsize=DISK_BLOCK_SIZE-currRemainder;
 		if (currBlocks<=5){
 			disk_read(block.inode[inumber].direct[currBlocks-1], datablock.data);
 			memcpy(datablock.data+currRemainder, data+index, readsize);
