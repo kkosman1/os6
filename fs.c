@@ -44,7 +44,7 @@ union fs_block {
 int fs_format()
 {
 	if (MOUNT==1){
-		printf("Error: cannot format before mounting.\n");
+		printf("Error: cannot mount before formatting.\n");
 		return 0;
 	}
 
@@ -146,8 +146,10 @@ int fs_mount()
 	for (i=0;i<block.super.nblocks;i++)
 		BLOCK_BITMAP[i]=0;
 
-	for (i=0;i<block.super.ninodes;i++)
+	for (i=0;i<block.super.ninodes;i++){
 		INODE_BITMAP[i]=0;
+		BLOCK_BITMAP[i]=1;
+	}
 
 	int numblock, size, direct;
 
@@ -170,6 +172,7 @@ int fs_mount()
 				if (numblock>0){
 					//go to the indirect block which contains a list of pointers
 					disk_read(block.inode[j].indirect, indirectblock.data);
+					BLOCK_BITMAP[block.inode[j].indirect]=1;
 					for (m=0;m<numblock;m++) {
 						BLOCK_BITMAP[indirectblock.pointers[m]]=1;
 					}
@@ -282,7 +285,9 @@ int fs_read( int inumber, char *data, int length, int offset )
 	int nCounter=offset/DISK_BLOCK_SIZE;
 	int end;
 
-	if (size > (length+offset))
+	if (size <= offset)
+		return 0;
+	else if (size > (length+offset))
 		end = length+offset;
 	else
 		end = size;
@@ -299,7 +304,7 @@ int fs_read( int inumber, char *data, int length, int offset )
 
 	for (i=nCounter;i<direct;i++){
 		disk_read(block.inode[inumber].direct[i], datablock.data);
-		if (i==numblock)
+		if (i==(numblock-1))
 			readsize=remainder;
 		else
 			readsize=DISK_BLOCK_SIZE;
@@ -315,7 +320,7 @@ int fs_read( int inumber, char *data, int length, int offset )
 	disk_read(block.inode[inumber].indirect, indirectblock.data);
 	for (i=start;i<indirect;i++){
 		disk_read(indirectblock.pointers[i], datablock.data);
-		if (i==numblock)
+		if ((i+direct)==(numblock-1))
 			readsize=remainder;
 		else
 			readsize=DISK_BLOCK_SIZE;
@@ -336,7 +341,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 	disk_read(0,block.data);
 
 	int size = block.inode[inumber].size;
-	int i;
+	int i, readsize;
 	int index=offset;
 	 
 	int blocknum = inumber/127 + 1;
@@ -344,18 +349,47 @@ int fs_write( int inumber, const char *data, int length, int offset )
 
 	disk_read(blocknum,block.data);
 	
-	int count = 0;
+	int count, icount;
 	int currBlocks = ceil((double)size/(double)DISK_BLOCK_SIZE); //blocks used currently
 	int currRemainder = size % DISK_BLOCK_SIZE;
-	int numblock = ceil((double)length/(double)DISK_BLOCK_SIZE); //last block number to be accessed
-	int remainder = length % DISK_BLOCK_SIZE;
+	int numblock = ceil((double)(length+size)/(double)DISK_BLOCK_SIZE); //last block number to be accessed
+	int remainder = (length+size) % DISK_BLOCK_SIZE;
 
-	if (INODE_BITMAP[i] == 0){
+	if (INODE_BITMAP[inumber] == 0){
 		printf("Error: invalid inumber.\n");
 		return 0;
 	}
 
+	if (currBlocks < 5){
+		count = currBlocks; //start direct
+		icount = 1;
+	}
+	else {
+		count = 5;
+		icount = currBlocks-5; //start indirect
+	}
+
 	disk_read(block.inode[inumber].indirect, indirectblock.data);
+
+
+	if (currRemainder != 0){ //fill in end of a block
+		if (count==numblock)
+			readsize=remainder;
+		else
+			readsize=DISK_BLOCK_SIZE;
+		if (currBlocks<=5){
+			disk_read(block.inode[inumber].direct[currBlocks-1], datablock.data);
+			memcpy(datablock.data+currRemainder, data+index, readsize);
+			disk_write(block.inode[inumber].direct[currBlocks-1], datablock.data);
+		}
+		else {
+			disk_read(indirectblock.pointers[currBlocks-6], datablock.data);
+			memcpy(datablock.data+currremainder, data+index, readsize);
+			disk_write(indirectblock.pointers[currBlocks-6], datablock.data);
+		}
+		index=index+readsize;
+		count++;
+	}
 
 	for (i=0; i<bitmapSize; i++){
 		if (BLOCK_BITMAP[i] == 0){
@@ -366,26 +400,31 @@ int fs_write( int inumber, const char *data, int length, int offset )
 			disk_read(i, datablock.data);
 			memcpy(datablock.data, data+index, readsize);
 			
-			if (count<=4){ //direct
-				block.inode[inumber].direct[count]=i;
-				disk_write(block.inode[inumber].direct[count], datablock.data);
+			if (count<=5){ //direct
+				block.inode[inumber].direct[count-1]=i;
+				disk_write(i, datablock.data);
+			}
+			else if (icount <= POINTERS_PER_BLOCK){ //indirect
+				count++;
+				indirectblock.pointers[icount-1]=i;
+				disk_write(i, datablock.data);
 			}
 			else {
-				indirectblock.pointers[count]=i;
-				disk_write(indirectblock.pointers[count], datablock.data);
+				break;
 			}
 	    		index=index+readsize;
 			BLOCK_BITMAP[i]=1;
-			count++;
-			if (count==blocknum){
-				disk_write(block, block.data);
-				disk_write(block.inode[inumber].indirect, indirectblock);
+			if (count==numblock){
+				block.inode[inumber].size+=index;
+				disk_write(blocknum, block.data);
+				disk_write(block.inode[inumber].indirect, indirectblock.data);
 				return index;
 			}
 		}
 	}
-	
-	disk_write(numblock, block.data);
-	disk_write(block.inode[inumber].indirect, indirectblock);
+
+	block.inode[inumber].size+=index;	
+	disk_write(blocknum, block.data);
+	disk_write(block.inode[inumber].indirect, indirectblock.data);
 	return index;
 }
