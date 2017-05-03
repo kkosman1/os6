@@ -384,7 +384,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 		}
 		else {
 			disk_read(indirectblock.pointers[currBlocks-6], datablock.data);
-			memcpy(datablock.data+currremainder, data+index, readsize);
+			memcpy(datablock.data+currRemainder, data+index, readsize);
 			disk_write(indirectblock.pointers[currBlocks-6], datablock.data);
 		}
 		index=index+readsize;
